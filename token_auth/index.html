@@ -18,44 +18,83 @@
 
 <main id="main-holder">
 
-    <h1 id="title">
-        Auth0 Login
+    <h1>
+        Auth0 Authentication
     </h1>
 
-    <div id="login-container">
+    <div id="guest-container">
 
-        <div id="login-error-msg">
-            Invalid username or password
-        </div>
+        <section>
 
-        <form id="login-form">
-
-            <input
-                    type="email"
-                    name="login"
-                    id="username-field"
-                    class="login-form-field"
-                    placeholder="Email"
-                    required
-            >
-
-            <input
-                    type="password"
-                    name="password"
-                    id="password-field"
-                    class="login-form-field"
-                    placeholder="Password"
-                    required
-            >
-
-            <button
-                    type="submit"
-                    id="login-form-submit"
-            >
+            <h2>
                 Login
-            </button>
+            </h2>
 
-        </form>
+            <div
+                    id="login-message"
+                    class="message"
+            ></div>
+
+            <form id="login-form">
+
+                <input
+                        type="email"
+                        name="login"
+                        placeholder="Email"
+                        required
+                >
+
+                <input
+                        type="password"
+                        name="password"
+                        placeholder="Password"
+                        required
+                >
+
+                <button type="submit">
+                    Login
+                </button>
+
+            </form>
+
+        </section>
+
+        <hr>
+
+        <section>
+
+            <h2>
+                Create Auth0 User
+            </h2>
+
+            <div
+                    id="register-message"
+                    class="message"
+            ></div>
+
+            <form id="register-form">
+
+                <input
+                        type="email"
+                        name="email"
+                        placeholder="Email"
+                        required
+                >
+
+                <input
+                        type="password"
+                        name="password"
+                        placeholder="Password"
+                        required
+                >
+
+                <button type="submit">
+                    Create user
+                </button>
+
+            </form>
+
+        </section>
 
     </div>
 
@@ -74,21 +113,34 @@
         </p>
 
         <p>
-            <strong>Token type:</strong>
-            <span id="token-type"></span>
+            <strong>Refresh token:</strong>
+            <span id="refresh-enabled"></span>
         </p>
 
         <p>
-            <strong>Expires in:</strong>
-            <span id="expires-in"></span>
+            <strong>Remaining token lifetime:</strong>
+            <span id="remaining-seconds">
+                -
+            </span>
             seconds
         </p>
 
         <p>
-            <strong>Access token:</strong>
+            <strong>Last refresh:</strong>
+            <span id="refresh-status">
+                not checked
+            </span>
+        </p>
+
+        <p>
+            <strong>Access Token:</strong>
         </p>
 
         <div id="access-token"></div>
+
+        <button id="check-token-button">
+            Check token lifetime
+        </button>
 
         <button id="logout-button">
             Logout
@@ -107,26 +159,34 @@
 
     html,
     body {
-        height: 100%;
+        min-height: 100%;
         margin: 0;
     }
 
     body {
-        font-family: Arial, Helvetica, sans-serif;
+        min-height: 100vh;
+
+        padding: 30px;
 
         display: flex;
+
         align-items: center;
         justify-content: center;
 
         background-color: #3a3a3a;
+
+        font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
     }
 
     #main-holder {
-        width: 500px;
+        width: 550px;
 
-        max-width: 90%;
+        max-width: 95%;
 
-        padding: 40px;
+        padding: 35px;
 
         background-color: white;
 
@@ -135,66 +195,98 @@
         box-shadow:
                 0 0 10px
                 rgba(0, 0, 0, 0.5);
+    }
 
+    h1,
+    h2 {
         text-align: center;
     }
 
-    #title {
-        margin-bottom: 30px;
+    hr {
+        margin:
+                35px
+                0;
     }
 
-    #login-form {
+    form {
         display: flex;
+
         flex-direction: column;
 
-        gap: 15px;
+        gap: 12px;
     }
 
-    .login-form-field {
+    input {
         padding: 12px;
 
-        font-size: 16px;
-
-        border: 1px solid #aaa;
+        border:
+                1px
+                solid
+                #aaa;
 
         border-radius: 5px;
-    }
-
-    #login-form-submit,
-    #logout-button {
-        padding: 12px;
 
         font-size: 16px;
-        font-weight: bold;
+    }
+
+    button {
+        padding: 12px;
+
+        margin-top: 8px;
 
         border: none;
 
         border-radius: 5px;
 
         background-color: #333;
+
         color: white;
+
+        font-size: 16px;
+
+        font-weight: bold;
 
         cursor: pointer;
     }
 
-    #login-form-submit:hover,
-    #logout-button:hover {
+    button:hover {
         background-color: #555;
     }
 
-    #login-error-msg {
+    .message {
         display: none;
-
-        margin-bottom: 20px;
 
         padding: 10px;
 
-        border: 1px solid #8a0000;
+        margin-bottom: 15px;
 
         border-radius: 5px;
+    }
+
+    .message.error {
+        display: block;
+
+        color: #8a0000;
 
         background-color: #e58f8f;
-        color: #8a0000;
+
+        border:
+                1px
+                solid
+                #8a0000;
+    }
+
+    .message.success {
+        display: block;
+
+        color: #155724;
+
+        background-color: #d4edda;
+
+        border:
+                1px
+                solid
+                #155724;
     }
 
     #user-container {
@@ -206,19 +298,22 @@
 
         margin-bottom: 20px;
 
-        background-color: #eeeeee;
+        max-height: 170px;
 
-        border-radius: 5px;
+        overflow-y: auto;
 
         overflow-wrap: anywhere;
 
+        border-radius: 5px;
+
+        background-color: #eee;
+
         font-family: monospace;
 
-        max-height: 150px;
-
-        overflow-y: auto;
+        font-size: 12px;
     }
 
+    #check-token-button,
     #logout-button {
         width: 100%;
     }
@@ -228,52 +323,95 @@
 
 <script>
 
-    const SESSION_STORAGE_KEY = 'auth0-session';
+    const SESSION_STORAGE_KEY =
+        'auth0-session';
 
-    const loginContainer =
-        document.getElementById('login-container');
+    const guestContainer =
+        document.getElementById(
+            'guest-container'
+        );
 
     const userContainer =
-        document.getElementById('user-container');
+        document.getElementById(
+            'user-container'
+        );
 
     const loginForm =
-        document.getElementById('login-form');
+        document.getElementById(
+            'login-form'
+        );
 
-    const loginErrorMsg =
-        document.getElementById('login-error-msg');
+    const registerForm =
+        document.getElementById(
+            'register-form'
+        );
+
+    const loginMessage =
+        document.getElementById(
+            'login-message'
+        );
+
+    const registerMessage =
+        document.getElementById(
+            'register-message'
+        );
 
     const usernameElement =
-        document.getElementById('username');
+        document.getElementById(
+            'username'
+        );
 
-    const tokenTypeElement =
-        document.getElementById('token-type');
+    const refreshEnabledElement =
+        document.getElementById(
+            'refresh-enabled'
+        );
 
-    const expiresInElement =
-        document.getElementById('expires-in');
+    const remainingSecondsElement =
+        document.getElementById(
+            'remaining-seconds'
+        );
+
+    const refreshStatusElement =
+        document.getElementById(
+            'refresh-status'
+        );
 
     const accessTokenElement =
-        document.getElementById('access-token');
+        document.getElementById(
+            'access-token'
+        );
+
+    const checkTokenButton =
+        document.getElementById(
+            'check-token-button'
+        );
 
     const logoutButton =
-        document.getElementById('logout-button');
+        document.getElementById(
+            'logout-button'
+        );
 
     function getSession() {
-        const storedSession =
-            sessionStorage.getItem(SESSION_STORAGE_KEY);
 
-        if (!storedSession) {
+        const raw =
+            sessionStorage.getItem(
+                SESSION_STORAGE_KEY
+            );
+
+        if (!raw) {
             return null;
         }
 
         try {
-            return JSON.parse(storedSession);
-        } catch (error) {
+            return JSON.parse(raw);
+        } catch {
             return null;
         }
     }
 
 
     function saveSession(session) {
+
         sessionStorage.setItem(
             SESSION_STORAGE_KEY,
             JSON.stringify(session)
@@ -282,92 +420,140 @@
 
 
     function removeSession() {
+
         sessionStorage.removeItem(
             SESSION_STORAGE_KEY
         );
     }
 
-    function showLogin() {
-        loginContainer.style.display = 'block';
-        userContainer.style.display = 'none';
+    function showMessage(
+        element,
+        message,
+        type
+    ) {
+
+        element.textContent =
+            message;
+
+        element.className =
+            `message ${type}`;
     }
 
 
-    function showLoggedIn(session) {
-        loginContainer.style.display = 'none';
-        userContainer.style.display = 'block';
+    function clearMessage(element) {
+
+        element.textContent = '';
+
+        element.className =
+            'message';
+    }
+
+    function showGuest() {
+
+        guestContainer.style.display =
+            'block';
+
+        userContainer.style.display =
+            'none';
+    }
+
+
+    function showUser(session) {
+
+        guestContainer.style.display =
+            'none';
+
+        userContainer.style.display =
+            'block';
 
         usernameElement.textContent =
             session.username;
 
-        tokenTypeElement.textContent =
-            session.tokenType || 'Bearer';
-
-        expiresInElement.textContent =
-            session.expiresIn || 'unknown';
+        refreshEnabledElement.textContent =
+            session.refreshEnabled
+                ? 'available'
+                : 'not returned';
 
         accessTokenElement.textContent =
             session.token;
+
+        if (
+            session.remainingSeconds !==
+            undefined
+        ) {
+            remainingSecondsElement.textContent =
+                session.remainingSeconds;
+        }
     }
 
+    function updateSessionFromResponse(
+        response
+    ) {
 
-    function showLoginError(message) {
-        loginErrorMsg.textContent =
-            message || 'Invalid username or password';
+        const session =
+            getSession();
 
-        loginErrorMsg.style.display = 'block';
-    }
-
-
-    function hideLoginError() {
-        loginErrorMsg.style.display = 'none';
-    }
-
-
-    async function checkExistingSession() {
-
-        const session = getSession();
-
-        if (!session || !session.token) {
-            showLogin();
-            return;
+        if (!session) {
+            return null;
         }
 
-        try {
+        const responseToken =
+            response.data?.token;
 
-            await axios.get(
-                '/',
-                {
-                    headers: {
-                        Authorization:
-                            `Bearer ${session.token}`
-                    }
-                }
+        const headerToken =
+            response.headers[
+                'x-new-access-token'
+                ];
+
+        const newToken =
+            responseToken ||
+            headerToken;
+
+        if (
+            newToken &&
+            newToken !== session.token
+        ) {
+            console.log(
+                'Browser received new access token'
             );
 
-            showLoggedIn(session);
-
-        } catch (error) {
-
-            removeSession();
-
-            showLogin();
+            session.token =
+                newToken;
         }
+
+        if (
+            response.data
+                ?.remainingSeconds !==
+            undefined
+        ) {
+            session.remainingSeconds =
+                response.data
+                    .remainingSeconds;
+        }
+
+        saveSession(session);
+
+        return session;
     }
 
     loginForm.addEventListener(
         'submit',
-        async (event) => {
+        async event => {
 
             event.preventDefault();
 
-            hideLoginError();
+            clearMessage(
+                loginMessage
+            );
 
             const login =
-                loginForm.login.value.trim();
+                loginForm.login
+                    .value
+                    .trim();
 
             const password =
-                loginForm.password.value;
+                loginForm.password
+                    .value;
 
             try {
 
@@ -382,29 +568,163 @@
 
                 const session = {
                     username:
-                    response.data.username,
+                    response.data
+                        .username,
 
                     token:
-                    response.data.token,
+                    response.data
+                        .token,
 
                     tokenType:
-                    response.data.tokenType,
+                    response.data
+                        .tokenType,
 
                     expiresIn:
-                    response.data.expiresIn
+                    response.data
+                        .expiresIn,
+
+                    refreshEnabled:
+                    response.data
+                        .refreshEnabled
                 };
 
-                saveSession(session);
+                saveSession(
+                    session
+                );
 
-                showLoggedIn(session);
+                showUser(
+                    session
+                );
 
             } catch (error) {
 
                 const message =
-                    error.response?.data?.message ||
+                    error.response
+                        ?.data
+                        ?.message ||
                     'Login failed';
 
-                showLoginError(message);
+                showMessage(
+                    loginMessage,
+                    message,
+                    'error'
+                );
+            }
+        }
+    );
+
+    registerForm.addEventListener(
+        'submit',
+        async event => {
+
+            event.preventDefault();
+
+            clearMessage(
+                registerMessage
+            );
+
+            const email =
+                registerForm.email
+                    .value
+                    .trim();
+
+            const password =
+                registerForm.password
+                    .value;
+
+            try {
+
+                const response =
+                    await axios.post(
+                        '/api/register',
+                        {
+                            email,
+                            password
+                        }
+                    );
+
+                showMessage(
+                    registerMessage,
+                    response.data.message,
+                    'success'
+                );
+
+                registerForm.reset();
+
+            } catch (error) {
+
+                const message =
+                    error.response
+                        ?.data
+                        ?.message ||
+                    'Unable to create user';
+
+                showMessage(
+                    registerMessage,
+                    message,
+                    'error'
+                );
+            }
+        }
+    );
+
+    checkTokenButton.addEventListener(
+        'click',
+        async () => {
+
+            const session =
+                getSession();
+
+            if (!session?.token) {
+                return;
+            }
+
+            try {
+
+                const response =
+                    await axios.get(
+                        '/api/token-status',
+                        {
+                            headers: {
+                                Authorization:
+                                    `Bearer ${session.token}`
+                            }
+                        }
+                    );
+
+                const updatedSession =
+                    updateSessionFromResponse(
+                        response
+                    );
+
+                accessTokenElement.textContent =
+                    updatedSession.token;
+
+                remainingSecondsElement.textContent =
+                    response.data
+                        .remainingSeconds;
+
+                if (
+                    response.data.refreshed
+                ) {
+                    refreshStatusElement.textContent =
+                        'token automatically refreshed';
+                } else {
+                    refreshStatusElement.textContent =
+                        'token is still valid';
+                }
+
+            } catch (error) {
+
+                removeSession();
+
+                showGuest();
+
+                showMessage(
+                    loginMessage,
+                    'Session expired. Please log in again.',
+                    'error'
+                );
             }
         }
     );
@@ -413,7 +733,8 @@
         'click',
         async () => {
 
-            const session = getSession();
+            const session =
+                getSession();
 
             try {
 
@@ -444,12 +765,67 @@
 
                 loginForm.reset();
 
-                showLogin();
+                showGuest();
             }
         }
     );
 
-    checkExistingSession();
+    async function restoreSession() {
+
+        const session =
+            getSession();
+
+        if (!session?.token) {
+            showGuest();
+            return;
+        }
+
+        try {
+
+            const response =
+                await axios.get(
+                    '/api/me',
+                    {
+                        headers: {
+                            Authorization:
+                                `Bearer ${session.token}`
+                        }
+                    }
+                );
+
+            const updatedSession =
+                updateSessionFromResponse(
+                    response
+                );
+
+            updatedSession.username =
+                response.data.username;
+
+            saveSession(
+                updatedSession
+            );
+
+            showUser(
+                updatedSession
+            );
+
+            if (
+                response.data.refreshed
+            ) {
+                refreshStatusElement.textContent =
+                    'token automatically refreshed';
+            }
+
+        } catch {
+
+            removeSession();
+
+            showGuest();
+        }
+    }
+
+
+    restoreSession();
 
 </script>
 
