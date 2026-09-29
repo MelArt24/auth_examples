@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { generateKeyPairSync } = require('node:crypto');
+const { generateKeyPairSync, randomBytes } = require('node:crypto');
+const { createJwe } = require('../auth/jwe');
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const jwksRsa = require('jwks-rsa');
@@ -16,8 +17,10 @@ test('Lab 4 routes retain login, refresh, registration and logout', async t => {
         AUTH0_MGMT_CLIENT_SECRET: 'test-management-secret',
         AUTH0_MGMT_AUDIENCE: 'https://tenant.example/api/v2/',
         AUTH0_CONNECTION: 'Username-Password-Authentication',
-        REFRESH_THRESHOLD_SECONDS: '60'
+        REFRESH_THRESHOLD_SECONDS: '60',
+        JWE_SECRET_KEY: randomBytes(32).toString('base64url')
     });
+    const { decryptJwt } = createJwe(process.env.JWE_SECRET_KEY);
     const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'local', use: 'sig', alg: 'RS256' };
     t.mock.method(jwksRsa.JwksClient.prototype, 'getKeys', async () => [jwk]);
@@ -71,11 +74,17 @@ test('Lab 4 routes retain login, refresh, registration and logout', async t => {
     assert.equal((await request('/api/register', null, {})).status, 400);
     const loggedIn = await login();
     assert.equal(loggedIn.status, 200);
-    assert.equal((await loggedIn.json()).token, loginToken);
+    const loginBody = await loggedIn.json();
+    let clientToken = loginBody.token;
+    assert.equal(clientToken.split('.').length, 5);
+    assert.notEqual(clientToken, loginToken);
+    assert.equal(await decryptJwt(clientToken), loginToken);
+    assert.ok(!JSON.stringify(loginBody).includes(loginToken));
     for (const route of ['/api/me', '/api/token-status']) {
         assert.equal((await request(route)).status, 401);
         assert.equal((await request(route, 'abc.def.xyz')).status, 401);
-        const response = await request(route, loginToken);
+        assert.equal((await request(route, loginToken)).status, 401);
+        const response = await request(route, clientToken);
         assert.equal(response.status, 200);
         const data = await response.json();
         assert.equal(data.token, undefined);
@@ -87,22 +96,33 @@ test('Lab 4 routes retain login, refresh, registration and logout', async t => {
 
     loginToken = makeToken(30, 'near-expiry');
     loginLifetime = 30;
-    assert.equal((await login()).status, 200);
-    const refreshed = await request('/api/token-status', loginToken);
+    const nearExpiryLogin = await login();
+    assert.equal(nearExpiryLogin.status, 200);
+    clientToken = (await nearExpiryLogin.json()).token;
+    const refreshed = await request('/api/token-status', clientToken);
     assert.equal(refreshed.status, 200);
-    assert.equal(refreshed.headers.get('x-new-access-token'), refreshToken);
+    const refreshedClientToken = refreshed.headers.get('x-new-access-token');
+    assert.equal(refreshedClientToken.split('.').length, 5);
+    assert.notEqual(refreshedClientToken, clientToken);
+    assert.notEqual(refreshedClientToken, refreshToken);
+    assert.equal(await decryptJwt(refreshedClientToken), refreshToken);
     assert.equal((await refreshed.json()).refreshed, true);
-    assert.equal((await request('/api/me', loginToken)).status, 401);
-    assert.equal((await request('/api/me', refreshToken)).status, 200);
-    assert.equal((await request('/api/logout', refreshToken, {})).status, 200);
+    assert.equal((await request('/api/me', clientToken)).status, 401);
+    assert.equal((await request('/api/me', refreshedClientToken)).status, 200);
     assert.equal((await request('/api/me', refreshToken)).status, 401);
+    assert.equal((await request('/api/logout', refreshedClientToken, {})).status, 200);
+    assert.equal((await request('/api/me', refreshedClientToken)).status, 401);
 
     loginToken = makeToken(30, 'bad-refresh-session');
-    assert.equal((await login()).status, 200);
+    const beforeInvalidRefresh = await login();
+    assert.equal(beforeInvalidRefresh.status, 200);
+    clientToken = (await beforeInvalidRefresh.json()).token;
     refreshToken = 'abc.def.xyz';
-    const invalidRefresh = await request('/api/me', loginToken);
+    const invalidRefresh = await request('/api/me', clientToken);
     assert.equal(invalidRefresh.status, 401);
     assert.equal(invalidRefresh.headers.get('x-new-access-token'), null);
+    assert.deepEqual(await invalidRefresh.json(), { authenticated: false, error: 'Unauthorized' });
+    assert.equal((await request('/api/me', clientToken)).status, 401);
     loginToken = makeToken(-1, 'expired');
     assert.equal((await login()).status, 401);
     loginToken = 'abc.def.xyz';

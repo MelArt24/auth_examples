@@ -13,7 +13,7 @@ function unauthorized(res) {
         .json({ authenticated: false, error: 'Unauthorized' });
 }
 
-function createRequireJwt(verifyToken) {
+function createRequireJwt(verifyToken, decryptJwt) {
     return async function requireJwt(req, res, next) {
         const token = getAccessToken(req);
 
@@ -22,8 +22,10 @@ function createRequireJwt(verifyToken) {
         }
 
         try {
-            req.auth = await verifyToken(token);
-            req.accessToken = token;
+            const innerAccessToken = await decryptJwt(token);
+            req.auth = await verifyToken(innerAccessToken);
+            req.encryptedToken = token;
+            req.innerAccessToken = innerAccessToken;
         } catch {
             return unauthorized(res);
         }

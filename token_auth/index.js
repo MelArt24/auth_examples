@@ -4,6 +4,7 @@ const express = require('express');
 const axios = require('axios');
 const path = require('path');
 const { createJwtValidator } = require('./auth/jwtValidator');
+const { createJwe } = require('./auth/jwe');
 const { createRequireJwt, getAccessToken, unauthorized } = require('./auth/requireJwt');
 
 const app = express();
@@ -73,7 +74,8 @@ const verifyToken = createJwtValidator({
     domain: AUTH0_DOMAIN,
     audience: AUTH0_AUDIENCE
 });
-const requireJwt = createRequireJwt(verifyToken);
+const { encryptJwt, decryptJwt } = createJwe(process.env.JWE_SECRET_KEY);
+const requireJwt = createRequireJwt(verifyToken, decryptJwt);
 
 
 function calculateExpiresAt(expiresIn) {
@@ -264,13 +266,13 @@ async function createAuth0User(
 }
 
 async function refreshSessionIfNeeded(
-    currentAccessToken,
+    currentEncryptedToken,
     session
 ) {
     if (!session.expiresAt) {
         return {
-            accessToken:
-            currentAccessToken,
+            encryptedToken:
+            currentEncryptedToken,
 
             session,
 
@@ -286,8 +288,8 @@ async function refreshSessionIfNeeded(
         REFRESH_THRESHOLD_MS
     ) {
         return {
-            accessToken:
-            currentAccessToken,
+            encryptedToken:
+            currentEncryptedToken,
 
             session,
 
@@ -340,8 +342,8 @@ async function refreshSessionIfNeeded(
         );
     }
 
-    // Verify the replacement before storing it or returning it to the browser.
     const claims = await verifyToken(newAccessToken);
+    const newEncryptedToken = await encryptJwt(newAccessToken);
 
     const newRefreshToken =
         refreshResult.refresh_token ||
@@ -355,7 +357,7 @@ async function refreshSessionIfNeeded(
     const updatedSession = {
         ...session,
 
-        accessToken:
+        innerAccessToken:
         newAccessToken,
 
         refreshToken:
@@ -366,11 +368,11 @@ async function refreshSessionIfNeeded(
     };
 
     sessions.delete(
-        currentAccessToken
+        currentEncryptedToken
     );
 
     sessions.set(
-        newAccessToken,
+        newEncryptedToken,
         updatedSession
     );
 
@@ -389,8 +391,8 @@ async function refreshSessionIfNeeded(
     );
 
     return {
-        accessToken:
-        newAccessToken,
+        encryptedToken:
+        newEncryptedToken,
 
         session:
         updatedSession,
@@ -405,15 +407,14 @@ async function requireAuthentication(
     res,
     next
 ) {
-    const accessToken =
-        getAccessToken(req);
+    const encryptedToken = req.encryptedToken;
 
-    if (!accessToken) {
+    if (!encryptedToken) {
         return unauthorized(res);
     }
 
     const session =
-        sessions.get(accessToken);
+        sessions.get(encryptedToken);
 
     if (!session) {
         return unauthorized(res);
@@ -422,15 +423,15 @@ async function requireAuthentication(
     try {
         const result =
             await refreshSessionIfNeeded(
-                accessToken,
+                encryptedToken,
                 session
             );
 
         req.session =
             result.session;
 
-        req.accessToken =
-            result.accessToken;
+        req.encryptedToken = result.encryptedToken;
+        req.innerAccessToken = result.session.innerAccessToken;
 
         req.tokenRefreshed =
             result.refreshed;
@@ -439,7 +440,7 @@ async function requireAuthentication(
             req.auth = result.claims;
             res.set(
                 'X-New-Access-Token',
-                result.accessToken
+                result.encryptedToken
             );
         }
 
@@ -452,7 +453,7 @@ async function requireAuthentication(
         );
 
         sessions.delete(
-            accessToken
+            encryptedToken
         );
 
         return unauthorized(res);
@@ -517,6 +518,7 @@ app.post(
             }
 
             await verifyToken(accessToken);
+            const encryptedToken = await encryptJwt(accessToken);
 
             const expiresAt =
                 calculateExpiresAt(
@@ -527,7 +529,7 @@ app.post(
                 username:
                 login,
 
-                accessToken,
+                innerAccessToken: accessToken,
 
                 refreshToken,
 
@@ -535,7 +537,7 @@ app.post(
             };
 
             sessions.set(
-                accessToken,
+                encryptedToken,
                 session
             );
 
@@ -573,7 +575,7 @@ app.post(
                 login,
 
                 token:
-                accessToken,
+                encryptedToken,
 
                 tokenType:
                 authResult.token_type,
@@ -747,12 +749,12 @@ app.post(
     '/api/logout',
     (req, res) => {
 
-        const accessToken =
+        const encryptedToken =
             getAccessToken(req);
 
-        if (accessToken) {
+        if (encryptedToken) {
             sessions.delete(
-                accessToken
+                encryptedToken
             );
         }
 

@@ -1,10 +1,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { generateKeyPairSync } = require('node:crypto');
+const { generateKeyPairSync, randomBytes } = require('node:crypto');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { createJwtValidator } = require('../auth/jwtValidator');
 const { createRequireJwt } = require('../auth/requireJwt');
+const { createJwe } = require('../auth/jwe');
 
 // Temporary signing fixtures only; no application encryption keys or Auth0 calls.
 const first = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -30,6 +31,8 @@ function tamper(token) {
 }
 
 test('JWT middleware verifies signatures and claims over HTTP', async t => {
+    const secret = randomBytes(32).toString('base64url');
+    const { encryptJwt, decryptJwt } = createJwe(secret);
     const requestedKids = [];
     const verifyToken = createJwtValidator({
         domain,
@@ -44,7 +47,7 @@ test('JWT middleware verifies signatures and claims over HTTP', async t => {
         }
     });
     const app = express();
-    app.get('/protected', createRequireJwt(verifyToken), (req, res) => {
+    app.get('/protected', createRequireJwt(verifyToken, decryptJwt), (req, res) => {
         res.json({ user: { sub: req.auth.sub } });
     });
     const server = app.listen(0, '127.0.0.1');
@@ -80,7 +83,40 @@ test('JWT middleware verifies signatures and claims over HTTP', async t => {
         ['unsigned', `Bearer ${sign({}, { algorithm: 'none' }, null)}`]
     ];
 
-    for (const [name, authorization] of failures) {
+    // Preserve every original inner-JWT assertion inside a correctly encrypted JWE.
+    const encryptedFailures = await Promise.all(failures.map(async ([name, value]) => [
+        name,
+        value?.startsWith('Bearer ') && name !== 'extra credential'
+            ? `Bearer ${await encryptJwt(value.slice(7))}` : value
+    ]));
+    const encrypted = await encryptJwt(valid);
+    function modifyPart(index) {
+        const parts = encrypted.split('.');
+        const bytes = Buffer.from(parts[index], 'base64url');
+        bytes[0] ^= 1;
+        parts[index] = bytes.toString('base64url');
+        return parts.join('.');
+    }
+    const { CompactEncrypt } = await import('jose');
+    async function withHeader(header) {
+        return new CompactEncrypt(new TextEncoder().encode(valid))
+            .setProtectedHeader(header).encrypt(Buffer.from(secret, 'base64url'));
+    }
+    encryptedFailures.push(
+        ['raw JWS bearer', `Bearer ${valid}`],
+        ['malformed JWE', 'Bearer abc..def.ghi.xyz'],
+        ['extra JWE credential', `Bearer ${encrypted} extra`],
+        ['tampered ciphertext', `Bearer ${modifyPart(3)}`],
+        ['tampered authentication tag', `Bearer ${modifyPart(4)}`],
+        ['tampered IV', `Bearer ${modifyPart(2)}`],
+        ['wrong encryption key', `Bearer ${await createJwe(randomBytes(32).toString('base64url')).encryptJwt(valid)}`],
+        ['wrong content type', `Bearer ${await withHeader({ alg: 'dir', enc: 'A256GCM', cty: 'text/plain' })}`],
+        ['missing content type', `Bearer ${await withHeader({ alg: 'dir', enc: 'A256GCM' })}`],
+        ['unsupported JWE enc', `Bearer ${await withHeader({ alg: 'dir', enc: 'A128CBC-HS256', cty: 'JWT' })}`],
+        ['unsupported JWE alg', `Bearer ${await withHeader({ alg: 'A256KW', enc: 'A256GCM', cty: 'JWT' })}`]
+    );
+
+    for (const [name, authorization] of encryptedFailures) {
         await t.test(name, async () => {
             const response = await fetch(url, {
                 headers: authorization ? { Authorization: authorization } : {}
@@ -100,7 +136,7 @@ test('JWT middleware verifies signatures and claims over HTTP', async t => {
     ]) {
         await t.test(name, async () => {
             const response = await fetch(url, {
-                headers: { Authorization: `bearer ${token}` }
+                headers: { Authorization: `bearer ${await encryptJwt(token)}` }
             });
             assert.equal(response.status, 200);
             assert.deepEqual(await response.json(), { user: { sub: 'auth0|test-user' } });
