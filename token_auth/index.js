@@ -3,6 +3,8 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const path = require('path');
+const { createJwtValidator } = require('./auth/jwtValidator');
+const { createRequireJwt, getAccessToken, unauthorized } = require('./auth/requireJwt');
 
 const app = express();
 
@@ -45,6 +47,7 @@ const AUTH0_USERS_URL =
 
 const requiredVariables = [
     'AUTH0_DOMAIN',
+    'AUTH0_AUDIENCE',
     'AUTH0_CLIENT_ID',
     'AUTH0_CLIENT_SECRET',
     'AUTH0_MGMT_CLIENT_ID',
@@ -66,23 +69,11 @@ if (missingVariables.length > 0) {
 }
 
 const sessions = new Map();
-
-function getAccessToken(req) {
-    const authorizationHeader =
-        req.get('Authorization');
-
-    if (!authorizationHeader) {
-        return null;
-    }
-
-    if (
-        authorizationHeader.startsWith('Bearer ')
-    ) {
-        return authorizationHeader.substring(7);
-    }
-
-    return authorizationHeader;
-}
+const verifyToken = createJwtValidator({
+    domain: AUTH0_DOMAIN,
+    audience: AUTH0_AUDIENCE
+});
+const requireJwt = createRequireJwt(verifyToken);
 
 
 function calculateExpiresAt(expiresIn) {
@@ -349,6 +340,9 @@ async function refreshSessionIfNeeded(
         );
     }
 
+    // Verify the replacement before storing it or returning it to the browser.
+    const claims = await verifyToken(newAccessToken);
+
     const newRefreshToken =
         refreshResult.refresh_token ||
         session.refreshToken;
@@ -401,7 +395,8 @@ async function refreshSessionIfNeeded(
         session:
         updatedSession,
 
-        refreshed: true
+        refreshed: true,
+        claims
     };
 }
 
@@ -414,22 +409,14 @@ async function requireAuthentication(
         getAccessToken(req);
 
     if (!accessToken) {
-        return res.status(401).json({
-            authenticated: false,
-            message:
-                'Authorization token is required'
-        });
+        return unauthorized(res);
     }
 
     const session =
         sessions.get(accessToken);
 
     if (!session) {
-        return res.status(401).json({
-            authenticated: false,
-            message:
-                'Session not found. Please log in again.'
-        });
+        return unauthorized(res);
     }
 
     try {
@@ -449,6 +436,7 @@ async function requireAuthentication(
             result.refreshed;
 
         if (result.refreshed) {
+            req.auth = result.claims;
             res.set(
                 'X-New-Access-Token',
                 result.accessToken
@@ -460,19 +448,14 @@ async function requireAuthentication(
     } catch (error) {
         console.error(
             'Token refresh failed:',
-            error.response?.data ||
-            error.message
+            'Unable to refresh or validate the session token'
         );
 
         sessions.delete(
             accessToken
         );
 
-        return res.status(401).json({
-            authenticated: false,
-            message:
-                'Session expired. Please log in again.'
-        });
+        return unauthorized(res);
     }
 }
 
@@ -532,6 +515,8 @@ app.post(
                             'Auth0 did not return access token'
                     });
             }
+
+            await verifyToken(accessToken);
 
             const expiresAt =
                 calculateExpiresAt(
@@ -603,8 +588,7 @@ app.post(
         } catch (error) {
             console.error(
                 'Auth0 login error:',
-                error.response?.data ||
-                error.message
+                'Authentication or access-token validation failed'
             );
 
             const message =
@@ -680,8 +664,7 @@ app.post(
         } catch (error) {
             console.error(
                 'Create user error:',
-                error.response?.data ||
-                error.message
+                'Auth0 user creation request failed'
             );
 
             const auth0Message =
@@ -706,6 +689,7 @@ app.post(
 
 app.get(
     '/api/me',
+    requireJwt,
     requireAuthentication,
     (req, res) => {
 
@@ -717,11 +701,10 @@ app.get(
         return res.json({
             authenticated: true,
 
+            user: { sub: req.auth.sub },
+
             username:
             req.session.username,
-
-            token:
-            req.accessToken,
 
             expiresAt:
             req.session.expiresAt,
@@ -736,14 +719,12 @@ app.get(
 
 app.get(
     '/api/token-status',
+    requireJwt,
     requireAuthentication,
     (req, res) => {
 
         return res.json({
             valid: true,
-
-            token:
-            req.accessToken,
 
             refreshed:
             req.tokenRefreshed,
@@ -785,31 +766,35 @@ app.post(
     }
 );
 
-app.listen(
-    PORT,
-    () => {
-        console.log(
-            '======================================='
-        );
+if (require.main === module) {
+    app.listen(
+        PORT,
+        () => {
+            console.log(
+                '======================================='
+            );
 
-        console.log(
-            'Auth0 Token Authentication'
-        );
+            console.log(
+                'Auth0 Token Authentication'
+            );
 
-        console.log(
-            `Server: http://localhost:${PORT}`
-        );
+            console.log(
+                `Server: http://localhost:${PORT}`
+            );
 
-        console.log(
-            `Auth0 domain: ${AUTH0_DOMAIN}`
-        );
+            console.log(
+                `Auth0 domain: ${AUTH0_DOMAIN}`
+            );
 
-        console.log(
-            `Refresh threshold: ${REFRESH_THRESHOLD_SECONDS} sec`
-        );
+            console.log(
+                `Refresh threshold: ${REFRESH_THRESHOLD_SECONDS} sec`
+            );
 
-        console.log(
-            '======================================='
-        );
-    }
-);
+            console.log(
+                '======================================='
+            );
+        }
+    );
+}
+
+module.exports = app;

@@ -70,8 +70,9 @@ typings/
 .yarn-integrity
 
 # dotenv environment variables file
-token_auth/.env
-.env.test
+.env
+.env.*
+!.env.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
