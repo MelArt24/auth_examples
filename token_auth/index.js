@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const path = require('path');
+const { randomBytes } = require('crypto');
 
 const app = express();
 
@@ -67,6 +68,36 @@ if (missingVariables.length > 0) {
 }
 
 const sessions = new Map();
+const pendingLogins = new Map();
+const STATE_COOKIE = 'auth0_login_state';
+const STATE_TTL_MS = 10 * 60 * 1000;
+const stateCookieOptions = {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: AUTH0_CALLBACK_URL.startsWith('https://'),
+    path: '/callback'
+};
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;',
+        '"': '&quot;', "'": '&#39;'
+    }[character]));
+}
+
+function sendCallbackPage(res, status, title, values) {
+    const rows = Object.entries(values).map(([label, value]) =>
+        `<dt>${escapeHtml(label)}</dt><dd><pre>${escapeHtml(value)}</pre></dd>`
+    ).join('');
+
+    return res.status(status).type('html').send(`<!DOCTYPE html>
+<html lang="uk">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title></head>
+<body><h1>${escapeHtml(title)}</h1><dl>${rows}</dl>
+<a href="/login">Увійти знову</a> | <a href="/">На головну</a></body>
+</html>`);
+}
 
 function getAccessToken(req) {
     const authorizationHeader =
@@ -429,16 +460,96 @@ app.get('/', (req, res) => {
 });
 
 app.get('/login', (req, res) => {
+    for (const [state, expiresAt] of pendingLogins) {
+        if (expiresAt <= Date.now()) pendingLogins.delete(state);
+    }
+    const state = randomBytes(32).toString('hex');
+    pendingLogins.set(state, Date.now() + STATE_TTL_MS);
+    res.cookie(STATE_COOKIE, state, { ...stateCookieOptions, maxAge: STATE_TTL_MS });
+    res.set('Cache-Control', 'no-store');
     const authorizeUrl = new URL('/authorize', `https://${AUTH0_DOMAIN}`);
 
     authorizeUrl.search = new URLSearchParams({
         client_id: AUTH0_CLIENT_ID,
         redirect_uri: AUTH0_CALLBACK_URL,
         response_type: 'code',
-        response_mode: 'query'
+        response_mode: 'query',
+        scope: 'openid profile email',
+        state
     }).toString();
 
     res.redirect(authorizeUrl.toString());
+});
+
+app.get('/callback', async (req, res) => {
+    res.set({
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        'X-Content-Type-Options': 'nosniff'
+    });
+
+    const { code, state, error, error_description: errorDescription } = req.query;
+    const cookieState = (req.get('Cookie') || '').split(';')
+        .map(cookie => cookie.trim())
+        .find(cookie => cookie.startsWith(`${STATE_COOKIE}=`))
+        ?.slice(STATE_COOKIE.length + 1);
+    const expiresAt = typeof state === 'string' ? pendingLogins.get(state) : undefined;
+
+    if (!expiresAt || expiresAt <= Date.now() || state !== cookieState) {
+        return sendCallbackPage(res, 400, 'Authorization error', {
+            message: 'Invalid or expired state. Start the login process from /login.'
+        });
+    }
+
+    pendingLogins.delete(state);
+    res.clearCookie(STATE_COOKIE, stateCookieOptions);
+
+    if (error !== undefined || errorDescription !== undefined) {
+        const redact = value => String(value).split(AUTH0_CLIENT_SECRET).join('[redacted]');
+        return sendCallbackPage(res, 400, 'Auth0 rejected the authorization', {
+            error: typeof error === 'string' ? redact(error) : 'authorization_error',
+            error_description: typeof errorDescription === 'string'
+                ? redact(errorDescription) : 'Auth0 did not provide an error description.'
+        });
+    }
+
+    if (typeof code !== 'string' || !code.trim()) {
+        return sendCallbackPage(res, 400, 'Authorization error', {
+            message: 'Authorization code is invalid or absent.'
+        });
+    }
+
+    try {
+        const body = new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: AUTH0_CLIENT_ID,
+            client_secret: AUTH0_CLIENT_SECRET,
+            code,
+            redirect_uri: AUTH0_CALLBACK_URL
+        });
+        const { data } = await axios.post(AUTH0_TOKEN_URL, body.toString(), {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 10000,
+            maxRedirects: 0
+        });
+
+        if (!data || typeof data.access_token !== 'string' || !data.access_token) {
+            throw new Error('Missing access token');
+        }
+
+        const result = { access_token: data.access_token };
+        if (typeof data.id_token === 'string' && data.id_token) {
+            result.id_token = data.id_token;
+        }
+        result.token_type = data.token_type ?? 'Not returned';
+        result.expires_in = data.expires_in ?? 'Not returned';
+        return sendCallbackPage(res, 200, 'Successful authorization', result);
+    } catch {
+        return sendCallbackPage(res, 502, 'Error retrieving tokens', {
+            message: 'Failed to exchange the authorization code for tokens. Please start the login process again.'
+        });
+    }
 });
 
 app.post(
