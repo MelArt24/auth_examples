@@ -35,27 +35,7 @@
                     class="message"
             ></div>
 
-            <form id="login-form">
-
-                <input
-                        type="email"
-                        name="login"
-                        placeholder="Email"
-                        required
-                >
-
-                <input
-                        type="password"
-                        name="password"
-                        placeholder="Password"
-                        required
-                >
-
-                <button type="submit">
-                    Login
-                </button>
-
-            </form>
+            <a href="/login">Login with Auth0</a>
 
         </section>
 
@@ -336,11 +316,6 @@
             'user-container'
         );
 
-    const loginForm =
-        document.getElementById(
-            'login-form'
-        );
-
     const registerForm =
         document.getElementById(
             'register-form'
@@ -536,83 +511,6 @@
         return session;
     }
 
-    loginForm.addEventListener(
-        'submit',
-        async event => {
-
-            event.preventDefault();
-
-            clearMessage(
-                loginMessage
-            );
-
-            const login =
-                loginForm.login
-                    .value
-                    .trim();
-
-            const password =
-                loginForm.password
-                    .value;
-
-            try {
-
-                const response =
-                    await axios.post(
-                        '/api/login',
-                        {
-                            login,
-                            password
-                        }
-                    );
-
-                const session = {
-                    username:
-                    response.data
-                        .username,
-
-                    token:
-                    response.data
-                        .token,
-
-                    tokenType:
-                    response.data
-                        .tokenType,
-
-                    expiresIn:
-                    response.data
-                        .expiresIn,
-
-                    refreshEnabled:
-                    response.data
-                        .refreshEnabled
-                };
-
-                saveSession(
-                    session
-                );
-
-                showUser(
-                    session
-                );
-
-            } catch (error) {
-
-                const message =
-                    error.response
-                        ?.data
-                        ?.message ||
-                    'Login failed';
-
-                showMessage(
-                    loginMessage,
-                    message,
-                    'error'
-                );
-            }
-        }
-    );
-
     registerForm.addEventListener(
         'submit',
         async event => {
@@ -762,8 +660,6 @@
             } finally {
 
                 removeSession();
-
-                loginForm.reset();
 
                 showGuest();
             }

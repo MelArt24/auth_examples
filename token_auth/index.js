@@ -15,7 +15,7 @@ const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
 
 const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
 const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
-const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;
+const AUTH0_CALLBACK_URL = process.env.AUTH0_CALLBACK_URL;
 
 const AUTH0_MGMT_CLIENT_ID =
     process.env.AUTH0_MGMT_CLIENT_ID;
@@ -46,6 +46,7 @@ const AUTH0_USERS_URL =
 const requiredVariables = [
     'AUTH0_DOMAIN',
     'AUTH0_CLIENT_ID',
+    'AUTH0_CALLBACK_URL',
     'AUTH0_CLIENT_SECRET',
     'AUTH0_MGMT_CLIENT_ID',
     'AUTH0_MGMT_CLIENT_SECRET'
@@ -105,64 +106,6 @@ function getRemainingSeconds(expiresAt) {
             (expiresAt - Date.now()) / 1000
         )
     );
-}
-
-async function loginWithAuth0(
-    username,
-    password
-) {
-    const body = new URLSearchParams();
-
-    body.append(
-        'grant_type',
-        'password'
-    );
-
-    body.append(
-        'username',
-        username
-    );
-
-    body.append(
-        'password',
-        password
-    );
-
-    body.append(
-        'client_id',
-        AUTH0_CLIENT_ID
-    );
-
-    body.append(
-        'client_secret',
-        AUTH0_CLIENT_SECRET
-    );
-
-    body.append(
-        'scope',
-        'openid profile email offline_access'
-    );
-
-    if (AUTH0_AUDIENCE) {
-        body.append(
-            'audience',
-            AUTH0_AUDIENCE
-        );
-    }
-
-    const response =
-        await axios.post(
-            AUTH0_TOKEN_URL,
-            body.toString(),
-            {
-                headers: {
-                    'Content-Type':
-                        'application/x-www-form-urlencoded'
-                }
-            }
-        );
-
-    return response.data;
 }
 
 async function refreshAuth0Token(
@@ -485,146 +428,18 @@ app.get('/', (req, res) => {
     );
 });
 
-app.post(
-    '/api/login',
-    async (req, res) => {
+app.get('/login', (req, res) => {
+    const authorizeUrl = new URL('/authorize', `https://${AUTH0_DOMAIN}`);
 
-        const {
-            login,
-            password
-        } = req.body;
+    authorizeUrl.search = new URLSearchParams({
+        client_id: AUTH0_CLIENT_ID,
+        redirect_uri: AUTH0_CALLBACK_URL,
+        response_type: 'code',
+        response_mode: 'query'
+    }).toString();
 
-        if (!login || !password) {
-            return res
-                .status(400)
-                .json({
-                    message:
-                        'Email and password are required'
-                });
-        }
-
-        try {
-            console.log(
-                'Sending login request to Auth0...'
-            );
-
-            console.log(
-                `User: ${login}`
-            );
-
-            const authResult =
-                await loginWithAuth0(
-                    login,
-                    password
-                );
-
-            const accessToken =
-                authResult.access_token;
-
-            const refreshToken =
-                authResult.refresh_token;
-
-            if (!accessToken) {
-                return res
-                    .status(500)
-                    .json({
-                        message:
-                            'Auth0 did not return access token'
-                    });
-            }
-
-            const expiresAt =
-                calculateExpiresAt(
-                    authResult.expires_in
-                );
-
-            const session = {
-                username:
-                login,
-
-                accessToken,
-
-                refreshToken,
-
-                expiresAt
-            };
-
-            sessions.set(
-                accessToken,
-                session
-            );
-
-            console.log(
-                '---------------------------------------'
-            );
-
-            console.log(
-                'Login successful'
-            );
-
-            console.log(
-                `User: ${login}`
-            );
-
-            console.log(
-                'Expires in:',
-                authResult.expires_in,
-                'seconds'
-            );
-
-            console.log(
-                'Refresh token received:',
-                Boolean(refreshToken)
-            );
-
-            console.log(
-                '---------------------------------------'
-            );
-
-            return res.json({
-                authenticated: true,
-
-                username:
-                login,
-
-                token:
-                accessToken,
-
-                tokenType:
-                authResult.token_type,
-
-                expiresIn:
-                authResult.expires_in,
-
-                refreshEnabled:
-                    Boolean(refreshToken)
-            });
-
-        } catch (error) {
-            console.error(
-                'Auth0 login error:',
-                error.response?.data ||
-                error.message
-            );
-
-            const message =
-                error.response
-                    ?.data
-                    ?.error_description ||
-                error.response
-                    ?.data
-                    ?.message ||
-                'Authentication failed';
-
-            return res
-                .status(401)
-                .json({
-                    authenticated: false,
-                    message
-                });
-        }
-    }
-);
+    res.redirect(authorizeUrl.toString());
+});
 
 app.post(
     '/api/register',
